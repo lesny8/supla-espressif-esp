@@ -25,13 +25,25 @@
 #include "board/supla_esp_board.h"
 #include "espmissingincludes.h"
 
-#define SUPLA_ESP_SOFTVER "2.7.0"
+#define SUPLA_ESP_SOFTVER "2.7.2"
+
+#ifndef ESP8266_SUPLA_PROTO_VERSION
+#define ESP8266_SUPLA_PROTO_VERSION SUPLA_PROTO_VERSION
+#endif /* ESP8266_SUPLA_PROTO_VERSION */
+
+#ifndef STATE_SECTOR_OFFSET
+#define STATE_SECTOR_OFFSET 1
+#endif /*STATE_SECTOR_OFFSET*/
 
 #define LO_VALUE  0
 #define HI_VALUE  1
 
 #define RELAY_INIT_VALUE LO_VALUE
 #define SAVE_STATE_DELAY  1000
+
+#ifndef SEND_BUFFER_SIZE
+#define SEND_BUFFER_SIZE 500
+#endif /*SEND_BUFFER_SIZE*/
 
 #ifndef CFG_BTN_PRESS_TIME
 #define CFG_BTN_PRESS_TIME      5000
@@ -51,15 +63,19 @@
 #endif /*RELAY_MAX_COUNT*/
 
 #ifndef RS_MAX_COUNT
-#define RS_MAX_COUNT            2
+#define RS_MAX_COUNT            8
 #endif /*RS_MAX_COUNT*/
 
+#ifndef RS_SAVE_STATE_DELAY
+#define RS_SAVE_STATE_DELAY     0
+#endif /*RS_SAVE_STATE_DELAY*/
+
 #ifndef CFG_TIME1_COUNT
-#define CFG_TIME1_COUNT         2
+#define CFG_TIME1_COUNT         8
 #endif /*CFG_TIME1_COUNT*/
 
 #ifndef CFG_TIME2_COUNT
-#define CFG_TIME2_COUNT         2
+#define CFG_TIME2_COUNT         8
 #endif /*CFG_TIME2_COUNT*/
 
 #ifndef SMOOTH_MAX_COUNT
@@ -131,6 +147,11 @@ void supla_esp_board_gpio_init(void);
 
 
 #ifdef __FOTA
+
+#ifndef UPDATE_TIMEOUT
+// 120 sec.
+#define UPDATE_TIMEOUT 120000000
+#endif /* UPDATE_TIMEOUT */
 
 #define RSA_NUM_BYTES 512
 #define RSA_PUBLIC_EXPONENT 65537
@@ -207,11 +228,30 @@ extern const uint8_t rsa_public_key_bytes[RSA_NUM_BYTES];
 #define ACTIVITY_TIMEOUT 10
 
 #ifndef WATCHDOG_TIMEOUT
+// us.
 #define WATCHDOG_TIMEOUT 60000000
 #endif /*WATCHDOG_TIMEOUT*/
 
+#ifndef WATCHDOG_SOFT_TIMEOUT
+// sec.
+// WATCHDOG_SOFT_TIMEOUT*1000000 > WATCHDOG_TIMEOUT == inactive
+#define WATCHDOG_SOFT_TIMEOUT 65
+#endif /*WATCHDOG_SOFT_TIMEOUT*/
+
 #ifndef RELAY_DOUBLE_TRY
 #define RELAY_DOUBLE_TRY 10000
+#endif
+
+#ifndef RS_MAX_COUNT
+#define RS_MAX_COUNT 4
+#endif
+
+#ifndef RGBW_CHANNEl_CMP
+#define RGBW_CHANNEl_CMP
+#endif
+
+#ifndef RGBW_CHANNEL_LIMIT
+#define RGBW_CHANNEL_LIMIT if ( ChannelNumber >= 2 ) return;
 #endif
 
 #endif /* SUPLA_ESP_H_ */

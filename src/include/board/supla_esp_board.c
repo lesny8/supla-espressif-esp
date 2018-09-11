@@ -81,12 +81,17 @@
 
 #include "board/acs_zam_row_02.c"
 
+#elif defined(__BOARD_zam_row_04)
+
+#include "board/acs_zam_row_04.c"
+
 #elif defined(__BOARD_zam_row_07)
 
 #include "board/acs_zam_row_07.c"
 
 #elif defined(__BOARD_zam_srw_01) \
-      || defined(__BOARD_n_srw_01)
+      || defined(__BOARD_n_srw_01) \
+	  || defined(__BOARD_k_srw_01) 
 
 #include "board/acs_zam_srw_01.c"
 
@@ -94,25 +99,35 @@
 
 #include "board/acs_zam_srw_01_tester.c"
 
+#elif defined(__BOARD_zam_srw_02)
+
+#include "board/acs_zam_srw_02.c"
+
 #elif defined(__BOARD_zam_srw_03)
 
 #include "board/acs_zam_srw_03.c"
 
-#elif defined(__BOARD_zam_sbp_02)
+#elif defined(__BOARD_zam_sbp_01) \
+	  || defined(__BOARD_n_sbp_01) \
+	  || defined(__BOARD_k_sbp_01)
 
-#include "board/acs_zam_sbp_02.c"
-
-#elif defined(__BOARD_n_sbp_01)
-
-#include "board/acs_n_sbp_01.c"
+#include "board/acs_zam_sbp_01.c"
 
 #elif defined(__BOARD_zam_slw_01)
 
 #include "board/acs_zam_slw_01.c"
 
+#elif defined(__BOARD_zam_slw_02)
+
+#include "board/acs_zam_slw_02.c"
+
 #elif defined(__BOARD_zam_pnw_01)
 
 #include "board/acs_zam_pnw_01.c"
+
+#elif defined(__BOARD_zam_mew_01)
+
+#include "board/acs_zam_mew_01.c"
 
 #elif defined(__BOARD_h801)
 

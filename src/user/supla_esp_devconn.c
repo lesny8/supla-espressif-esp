@@ -37,11 +37,14 @@
 #include "supla-dev/srpc.h"
 #include "supla-dev/log.h"
 
+#ifdef ELECTRICITY_METER
+#include "supla_esp_electricity_meter.h"
+#endif
+
 #ifdef __FOTA
 #include "supla_update.h"
 #endif
 
-#define SEND_BUFFER_SIZE 500
 #define CVD_MAX_COUNT 4
 
 typedef struct {
@@ -76,10 +79,9 @@ typedef struct {
 
 	char laststate[STATE_MAXSIZE];
 
-	char autoconnect;
-
 	unsigned int last_response;
 	unsigned int last_sent;
+	unsigned int next_wd_soft_timeout_challenge;
 	int server_activity_timeout;
 
 	uint8 last_wifi_status;
@@ -135,9 +137,9 @@ devconn_smooth smooth[SMOOTH_MAX_COUNT];
 
 
 void DEVCONN_ICACHE_FLASH supla_esp_devconn_timer1_cb(void *timer_arg);
-void DEVCONN_ICACHE_FLASH supla_esp_wifi_check_status(char autoconnect);
-void DEVCONN_ICACHE_FLASH supla_esp_srpc_free(void);
+void DEVCONN_ICACHE_FLASH supla_esp_wifi_check_status(void);
 void DEVCONN_ICACHE_FLASH supla_esp_devconn_iterate(void *timer_arg);
+void DEVCONN_ICACHE_FLASH supla_esp_devconn_reconnect(void);
 
 void DEVCONN_ICACHE_FLASH
 supla_esp_devconn_system_restart(void) {
@@ -145,7 +147,8 @@ supla_esp_devconn_system_restart(void) {
     if ( supla_esp_cfgmode_started() == 0 ) {
 
     	os_timer_disarm(&devconn->supla_watchdog_timer);
-    	supla_esp_srpc_free();
+    	os_timer_disarm(&devconn->supla_devconn_timer1);
+    	os_timer_disarm(&devconn->supla_iterate_timer);
 
 		#ifdef BOARD_GPIO_BEFORE_REBOOT
 		supla_esp_board_before_reboot();
@@ -319,8 +322,7 @@ supla_esp_on_version_error(TSDC_SuplaVersionError *version_error) {
 void DEVCONN_ICACHE_FLASH
 supla_esp_devconn_send_channel_values_cb(void *ptr) {
 
-	if ( devconn->srpc != NULL
-		 && devconn->registered == 1 ) {
+	if ( supla_esp_devconn_is_registered() == 1 ) {
 
 		int a;
 
@@ -406,6 +408,10 @@ supla_esp_on_register_result(TSD_SuplaRegisterDeviceResult *register_device_resu
 
 		supla_esp_devconn_send_channel_values_with_delay();
 
+		#ifdef ELECTRICITY_METER
+		supla_esp_em_device_registered();
+		#endif
+
 		#ifdef BOARD_ON_DEVICE_REGISTERED
 			BOARD_ON_DEVICE_REGISTERED;
 		#endif
@@ -439,7 +445,6 @@ supla_esp_on_register_result(TSD_SuplaRegisterDeviceResult *register_device_resu
 		break;
 	}
 
-	devconn->autoconnect = 0;
 	supla_esp_devconn_stop();
 }
 
@@ -448,11 +453,24 @@ supla_esp_channel_set_activity_timeout_result(TSDC_SuplaSetActivityTimeoutResult
 	devconn->server_activity_timeout = result->activity_timeout;
 }
 
+char DEVCONN_ICACHE_FLASH supla_esp_devconn_is_registered(void) {
+	return devconn->srpc != NULL
+			&& devconn->registered == 1 ? 1 : 0;
+}
+
+void DEVCONN_ICACHE_FLASH
+supla_esp_channel_value__changed(int channel_number, char value[SUPLA_CHANNELVALUE_SIZE]) {
+
+	if ( supla_esp_devconn_is_registered() ) {
+		srpc_ds_async_channel_value_changed(devconn->srpc, channel_number, value);
+	}
+
+}
+
 void DEVCONN_ICACHE_FLASH
 supla_esp_channel_value_changed(int channel_number, char v) {
 
-	if ( devconn->srpc != NULL
-		 && devconn->registered == 1 ) {
+	if ( supla_esp_devconn_is_registered() == 1 ) {
 
 		//supla_log(LOG_DEBUG, "supla_esp_channel_value_changed(%i, %i)", channel_number, v);
 
@@ -463,6 +481,14 @@ supla_esp_channel_value_changed(int channel_number, char v) {
 		srpc_ds_async_channel_value_changed(devconn->srpc, channel_number, value);
 	}
 
+}
+
+void DEVCONN_ICACHE_FLASH
+supla_esp_channel_extendedvalue_changed(unsigned char channel_number, TSuplaChannelExtendedValue *value) {
+
+	if ( supla_esp_devconn_is_registered() == 1 ) {
+		srpc_ds_async_channel_extendedvalue_changed(devconn->srpc, channel_number, value);
+	}
 }
 
 #if defined(RGBW_CONTROLLER_CHANNEL) \
@@ -483,12 +509,11 @@ supla_esp_channel_rgbw_to_value(char value[SUPLA_CHANNELVALUE_SIZE], int color, 
 
 }
 
+
 void DEVCONN_ICACHE_FLASH
 supla_esp_channel_value_changed_delayed_cb(void *timer_arg) {
 	
-	if ( devconn->srpc != NULL
-		 && devconn->registered == 1 ) {
-
+	if ( supla_esp_devconn_is_registered() ) {
 		srpc_ds_async_channel_value_changed(devconn->srpc, ((channel_value_delayed*)timer_arg)->channel_number, ((channel_value_delayed*)timer_arg)->value);
 	}
 	
@@ -775,8 +800,7 @@ _supla_esp_devconn_smooth_cb(void) {
 void DEVCONN_ICACHE_FLASH
 supla_esp_channel_set_rgbw_value(int ChannelNumber, int Color, char ColorBrightness, char Brightness, char smoothly, char send_value_changed) {
 
-	if ( ChannelNumber >= 2 )
-		return;
+	RGBW_CHANNEL_LIMIT
 	
 	if ( ColorBrightness < 0 ) {
 		ColorBrightness = 0;
@@ -852,7 +876,8 @@ supla_esp_channel_set_value(TSD_SuplaChannelNewValue *new_value) {
 	#endif
 
 	if ( new_value->ChannelNumber == rgb_cn
-			|| new_value->ChannelNumber == dimmer_cn ) {
+			|| new_value->ChannelNumber == dimmer_cn
+			RGBW_CHANNEl_CMP ) {
 
 		int Color = 0;
 		char ColorBrightness = 0;
@@ -871,18 +896,20 @@ supla_esp_channel_set_value(TSD_SuplaChannelNewValue *new_value) {
 		if ( ColorBrightness > 100 )
 			ColorBrightness = 0;
 
-		if ( new_value->ChannelNumber == rgb_cn ) {
+		if (new_value->ChannelNumber < RS_MAX_COUNT) {
+			if ( new_value->ChannelNumber == rgb_cn ) {
 
-			supla_esp_state.color[0] = Color;
-			supla_esp_state.color_brightness[0] = ColorBrightness;
-			supla_esp_state.brightness[0] = Brightness;
+				supla_esp_state.color[new_value->ChannelNumber] = Color;
+				supla_esp_state.color_brightness[new_value->ChannelNumber] = ColorBrightness;
+				supla_esp_state.brightness[new_value->ChannelNumber] = Brightness;
 
-		} else if ( new_value->ChannelNumber == dimmer_cn ) {
+			} else if ( new_value->ChannelNumber == dimmer_cn
+					RGBW_CHANNEl_CMP ) {
 
-			supla_esp_state.brightness[1] = Brightness;
+				supla_esp_state.brightness[new_value->ChannelNumber] = Brightness;
 
+			}
 		}
-
 
 		supla_esp_channel_set_rgbw_value(new_value->ChannelNumber, Color, ColorBrightness, Brightness, 1, 1);
 		supla_esp_save_state(1000);
@@ -1086,16 +1113,8 @@ supla_esp_devconn_iterate(void *timer_arg) {
 
 }
 
-
 void DEVCONN_ICACHE_FLASH
 supla_esp_srpc_free(void) {
-
-	os_timer_disarm(&devconn->supla_iterate_timer);
-
-	devconn->registered = 0;
-	devconn->last_response = 0;
-	devconn->last_sent = 0;
-
 	if ( devconn->srpc != NULL ) {
 		srpc_free(devconn->srpc);
 		devconn->srpc = NULL;
@@ -1115,6 +1134,8 @@ supla_esp_srpc_init(void) {
 
 	devconn->srpc = srpc_init(&srpc_params);
 	
+	srpc_set_proto_version(devconn->srpc, ESP8266_SUPLA_PROTO_VERSION);
+
 	os_timer_setfn(&devconn->supla_iterate_timer, (os_timer_func_t *)supla_esp_devconn_iterate, NULL);
 	os_timer_arm(&devconn->supla_iterate_timer, 100, 1);
 
@@ -1134,31 +1155,22 @@ supla_espconn_disconnect(struct espconn *espconn) {
 
 void DEVCONN_ICACHE_FLASH
 supla_esp_devconn_connect_cb(void *arg) {
-	//supla_log(LOG_DEBUG, "devconn_connect_cb\r\n");
-	supla_esp_srpc_init();	
-	devconn->autoconnect = 1;
+	//supla_log(LOG_DEBUG, "devconn_connect_cb");
+	supla_esp_srpc_init();
 }
 
 
 void DEVCONN_ICACHE_FLASH
 supla_esp_devconn_disconnect_cb(void *arg){
-	//supla_log(LOG_DEBUG, "devconn_disconnect_cb\r\n");
-
-	devconn->autoconnect = 1;
-
-	 if ( supla_esp_cfgmode_started() == 0
-		  && supla_esp_devconn_update_started() == 0 ) {
-
-			supla_esp_srpc_free();
-			supla_esp_wifi_check_status(devconn->autoconnect);
-
-	 }
-
+	//supla_log(LOG_DEBUG, "devconn_disconnect_cb");
+    supla_esp_devconn_reconnect();
 }
 
 
 void DEVCONN_ICACHE_FLASH
 supla_esp_devconn_dns_found_cb(const char *name, ip_addr_t *ip, void *arg) {
+
+	//supla_log(LOG_DEBUG, "supla_esp_devconn_dns_found_cb");
 
 	if ( ip == NULL ) {
 		supla_esp_set_state(LOG_NOTICE, "Domain not found.");
@@ -1179,11 +1191,6 @@ supla_esp_devconn_dns_found_cb(const char *name, ip_addr_t *ip, void *arg) {
 		devconn->ESPConn.proto.tcp->remote_port = 2015;
 	#else
 		devconn->ESPConn.proto.tcp->remote_port = 2016;
-
-		//espconn_secure_set_size(2, 0);
-		//espconn_secure_set_size(1, 3072);
-		//supla_log(LOG_DEBUG, "getsize: %i, %i, %i", espconn_secure_get_size(1), espconn_secure_get_size(2), espconn_secure_get_size(3));
-
 	#endif
 
 	espconn_regist_recvcb(&devconn->ESPConn, supla_esp_devconn_recv_cb);
@@ -1197,8 +1204,7 @@ supla_esp_devconn_dns_found_cb(const char *name, ip_addr_t *ip, void *arg) {
 void DEVCONN_ICACHE_FLASH
 supla_esp_devconn_resolvandconnect(void) {
 
-	devconn->autoconnect = 0;
-
+	//supla_log(LOG_DEBUG, "supla_esp_devconn_resolvandconnect");
 	supla_espconn_disconnect(&devconn->ESPConn);
 
 	uint32_t _ip = ipaddr_addr(supla_esp_cfg.Server);
@@ -1222,9 +1228,19 @@ supla_esp_devconn_watchdog_cb(void *timer_arg) {
 
 			unsigned int t = system_get_time();
 
-			if ( t > devconn->last_response && t-devconn->last_response > WATCHDOG_TIMEOUT ) {
-				supla_log(LOG_DEBUG, "WATCHDOG TIMEOUT");
-				supla_esp_devconn_system_restart();
+			if ( t > devconn->last_response ) {
+				if ( t-devconn->last_response > WATCHDOG_TIMEOUT ) {
+					supla_log(LOG_DEBUG, "WATCHDOG TIMEOUT");
+					supla_esp_devconn_system_restart();
+				} else {
+					unsigned int t2 = abs((t-devconn->last_response)/1000000);
+					if ( t2 >= WATCHDOG_SOFT_TIMEOUT
+						 && t2 > devconn->server_activity_timeout
+						 && t > devconn->next_wd_soft_timeout_challenge ) {
+						supla_log(LOG_DEBUG, "WATCHDOG SOFT TIMEOUT");
+						supla_esp_devconn_reconnect();
+					}
+				}
 			}
 
 	 }
@@ -1264,31 +1280,21 @@ supla_esp_devconn_before_update_start(void) {
 void DEVCONN_ICACHE_FLASH
 supla_esp_devconn_init(void) {
 
-	if ( devconn == NULL ) {
-		devconn = (devconn_params*)malloc(sizeof(devconn_params));
-		memset(devconn, 0, sizeof(devconn_params));
-	}
-
-
+	devconn = (devconn_params*)malloc(sizeof(devconn_params));
+	memset(devconn, 0, sizeof(devconn_params));
 	memset(&devconn->ESPConn, 0, sizeof(struct espconn));
 	memset(&devconn->ESPTCP, 0, sizeof(esp_tcp));
 	
-	devconn->last_response = 0;
-	devconn->last_sent = 0;
-	devconn->autoconnect = 1;
-	devconn->last_wifi_status = STATION_GOT_IP+1;
-
-	ets_snprintf(devconn->laststate, STATE_MAXSIZE, "WiFi - Connecting...");
-	//sys_wait_for_restart = 0;
-
 	os_timer_disarm(&devconn->supla_watchdog_timer);
 	os_timer_setfn(&devconn->supla_watchdog_timer, (os_timer_func_t *)supla_esp_devconn_watchdog_cb, NULL);
 	os_timer_arm(&devconn->supla_watchdog_timer, 1000, 1);
-
 }
 
 void DEVCONN_ICACHE_FLASH
 supla_esp_devconn_start(void) {
+
+	devconn->last_wifi_status = STATION_GOT_IP+1;
+	ets_snprintf(devconn->laststate, STATE_MAXSIZE, "WiFi - Connecting...");
 	
 	wifi_station_disconnect();
 	
@@ -1325,8 +1331,27 @@ void DEVCONN_ICACHE_FLASH
 supla_esp_devconn_stop(void) {
 	
 	os_timer_disarm(&devconn->supla_devconn_timer1);
+	os_timer_disarm(&devconn->supla_iterate_timer);
+
 	supla_espconn_disconnect(&devconn->ESPConn);
-	supla_esp_wifi_check_status(0);
+	supla_esp_wifi_check_status();
+
+	devconn->registered = 0;
+	supla_esp_srpc_free();
+
+}
+
+void DEVCONN_ICACHE_FLASH
+supla_esp_devconn_reconnect(void) {
+
+	devconn->next_wd_soft_timeout_challenge = system_get_time() + WATCHDOG_SOFT_TIMEOUT*1000000;
+
+    if ( supla_esp_cfgmode_started() == 0
+		  && supla_esp_devconn_update_started() == 0 ) {
+
+			supla_esp_devconn_stop();
+			supla_esp_devconn_start();
+	 }
 }
 
 char * DEVCONN_ICACHE_FLASH
@@ -1335,13 +1360,15 @@ supla_esp_devconn_laststate(void) {
 }
 
 void DEVCONN_ICACHE_FLASH
-supla_esp_wifi_check_status(char autoconnect) {
+supla_esp_wifi_check_status(void) {
 
 	uint8 status = wifi_station_get_connect_status();
 
-	if ( status != devconn->last_wifi_status )
-		supla_log(LOG_DEBUG, "WiFi Status: %i", status);
+	if (devconn->last_wifi_status == status) {
+		return;
+	}
 
+	supla_log(LOG_DEBUG, "WiFi Status: %i", status);
 	devconn->last_wifi_status = status;
 
 	if ( STATION_GOT_IP == status ) {
@@ -1349,11 +1376,8 @@ supla_esp_wifi_check_status(char autoconnect) {
 		if ( devconn->srpc == NULL ) {
 
 			supla_esp_gpio_state_ipreceived();
-
-			 if ( autoconnect == 1 )
-				 supla_esp_devconn_resolvandconnect();
+			supla_esp_devconn_resolvandconnect();
 		}
-
 
 	} else {
 
@@ -1376,7 +1400,7 @@ supla_esp_wifi_check_status(char autoconnect) {
 void DEVCONN_ICACHE_FLASH
 supla_esp_devconn_timer1_cb(void *timer_arg) {
 
-	supla_esp_wifi_check_status(devconn->autoconnect);
+	supla_esp_wifi_check_status();
 
 	unsigned int t1;
 	unsigned int t2;
@@ -1384,7 +1408,7 @@ supla_esp_devconn_timer1_cb(void *timer_arg) {
 
 	//supla_log(LOG_DEBUG, "Free heap size: %i", system_get_free_heap_size());
 
-	if ( devconn->registered == 1
+	if ( supla_esp_devconn_is_registered() == 1
 		 && devconn->server_activity_timeout > 0
 		 && devconn->srpc != NULL ) {
 
@@ -1396,8 +1420,7 @@ supla_esp_devconn_timer1_cb(void *timer_arg) {
 
 		    	supla_log(LOG_DEBUG, "Activity timeout %i, %i, %i, %i",  t1, devconn->last_response, (t1-devconn->last_response)/1000000, devconn->server_activity_timeout+10);
 
-		    	supla_esp_srpc_free();
-		    	supla_esp_wifi_check_status(devconn->autoconnect);
+		    	supla_esp_devconn_reconnect();
 
 		    } else if ( ( t2 >= (devconn->server_activity_timeout-5)
 		    		      && t2 <= devconn->server_activity_timeout )
@@ -1414,39 +1437,12 @@ supla_esp_devconn_timer1_cb(void *timer_arg) {
 	}
 }
 
-#if defined(TEMPERATURE_CHANNEL) || defined(TEMPERATURE_HUMIDITY_CHANNEL)
-
-void DEVCONN_ICACHE_FLASH supla_esp_devconn_on_temp_humidity_changed(char humidity) {
-
-	if ( devconn->srpc != NULL
-		 && devconn->registered == 1 ) {
-
-		char value[SUPLA_CHANNELVALUE_SIZE];
-
-        #if defined(TEMPERATURE_CHANNEL)
-
-		    memset(value, 0, sizeof(SUPLA_CHANNELVALUE_SIZE));
-
-			supla_get_temperature(value);
-			srpc_ds_async_channel_value_changed(devconn->srpc, TEMPERATURE_CHANNEL, value);
-
-		#endif
-
-        #if defined(TEMPERATURE_HUMIDITY_CHANNEL)
-
-			memset(value, 0, sizeof(SUPLA_CHANNELVALUE_SIZE));
-
-			supla_get_temp_and_humidity(value);
-			srpc_ds_async_channel_value_changed(devconn->srpc, TEMPERATURE_HUMIDITY_CHANNEL, value);
-
-		#endif
-
-
-	}
-
+#ifdef ELECTRICITY_METER
+void DEVCONN_ICACHE_FLASH supla_esp_channel_em_value_changed(unsigned char channel_number, TElectricityMeter_ExtendedValue *em_ev) {
+	TSuplaChannelExtendedValue ev;
+	srpc_evtool_v1_emextended2extended(em_ev, &ev);
+	supla_esp_channel_extendedvalue_changed(channel_number, &ev);
 }
-
-#endif
-
+#endif /*ELECTRICITY_METER*/
 
 

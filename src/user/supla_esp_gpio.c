@@ -77,7 +77,7 @@ supla_esp_gpio_rs_calibrate(supla_roller_shutter_cfg_t *rs_cfg, unsigned int ful
 
 		if ( time >= full_time ) {
 			*rs_cfg->position = pos;
-			supla_esp_save_state(0);
+			supla_esp_save_state(RS_SAVE_STATE_DELAY);
 		}
 	};
 
@@ -225,7 +225,7 @@ supla_esp_gpio_rs_move_position(supla_roller_shutter_cfg_t *rs_cfg, unsigned int
 		}
 
 		if ( last_pos != *rs_cfg->position ) {
-			supla_esp_save_state(0);
+			supla_esp_save_state(RS_SAVE_STATE_DELAY);
 		}
 
 
@@ -418,7 +418,7 @@ supla_esp_gpio_rs_cancel_task(supla_roller_shutter_cfg_t *rs_cfg) {
 	rs_cfg->task.percent = 0;
 	rs_cfg->task.direction = RS_DIRECTION_NONE;
 
-	supla_esp_save_state(0);
+	supla_esp_save_state(RS_SAVE_STATE_DELAY);
 }
 
 
@@ -438,7 +438,7 @@ void supla_esp_gpio_rs_add_task(int idx, uint8 percent) {
 	supla_rs_cfg[idx].task.direction = RS_DIRECTION_NONE;
 	supla_rs_cfg[idx].task.active = 1;
 
-	supla_esp_save_state(0);
+	supla_esp_save_state(RS_SAVE_STATE_DELAY);
 
 }
 
@@ -1120,14 +1120,18 @@ supla_esp_gpio_init(void) {
 
 			  //supla_log(LOG_DEBUG, "relay init %i", supla_relay_cfg[a].gpio_id);
 
-			if ( supla_relay_cfg[a].gpio_id <= 16
+			if ( supla_relay_cfg[a].gpio_id <= 15
 				 && !(supla_relay_cfg[a].flags & RELAY_FLAG_VIRTUAL_GPIO ) ) {
 
 				GPIO_REG_WRITE(GPIO_STATUS_W1TC_ADDRESS, BIT(supla_relay_cfg[a].gpio_id));
 				gpio_pin_intr_state_set(GPIO_ID_PIN(supla_relay_cfg[a].gpio_id), GPIO_PIN_INTR_DISABLE);
 				gpio_output_set(0, GPIO_ID_PIN(supla_relay_cfg[a].gpio_id), GPIO_ID_PIN(supla_relay_cfg[a].gpio_id), 0);
 
+			} else if (supla_relay_cfg[a].gpio_id == 16) {
+				gpio16_output_conf();
 			}
+
+
 
 			supla_relay_cfg[a].last_time = 2147483647;
 
@@ -1158,7 +1162,7 @@ supla_esp_gpio_init(void) {
 
     for (a=0; a<INPUT_MAX_COUNT; a++)
       if ( supla_input_cfg[a].gpio_id != 255
-    	    && supla_input_cfg[a].gpio_id <= 16
+    	    && supla_input_cfg[a].gpio_id < 16
     		&& supla_input_cfg[a].type != 0 ) {
 
     	//supla_log(LOG_DEBUG, "input init %i", supla_input_cfg[a].gpio_id);
@@ -1443,7 +1447,7 @@ char __supla_esp_gpio_relay_is_hi(supla_relay_cfg_t *relay_cfg) {
 
 	char result = supla_esp_gpio_output_is_hi(relay_cfg->gpio_id);
 
-	if ( supla_relay_cfg->flags &  RELAY_FLAG_LO_LEVEL_TRIGGER ) {
+	if ( relay_cfg->flags & RELAY_FLAG_LO_LEVEL_TRIGGER ) {
 		result = result == HI_VALUE ? LO_VALUE : HI_VALUE;
 	}
 
