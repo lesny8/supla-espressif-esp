@@ -16,25 +16,23 @@
  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 
-#ifndef SONOFF_DUAL_H_
-#define SONOFF_DUAL_H_
+#ifndef IMPULSE_COUNTER_H_
+#define IMPULSE_COUNTER_H_
 
-#define ESP8266_SUPLA_PROTO_VERSION 7
-#define LED_RED_PORT    13
-#define B_RELAY1_PORT   20
-#define B_RELAY2_PORT   21
+#define IMPULSE_COUNTER
 
-void supla_esp_board_start(void);
+#define IMPULSE_PORT 4
+#define LED_RED_PORT 5
+#define B_CFG_PORT 0
 
-void supla_esp_board_gpio_hi(int port, char hi);
-char supla_esp_board_gpio_is_hi(int port);
-char supla_esp_board_gpio_relay_on(int port);
+#define BOARD_ESP_STARTING supla_esp_board_starting();
+#define BOARD_INTR_HANDLER \
+  if (supla_esp_board_intr_handler(gpio_status)) return
 
 void supla_esp_board_send_channel_values_with_delay(void *srpc);
-
-#define BOARD_GPIO_OUTPUT_SET_HI if ( port >= 20 ) { supla_esp_board_gpio_hi(port, hi); return; };
-#define BOARD_GPIO_OUTPUT_IS_HI if ( port >= 20 ) return supla_esp_board_gpio_is_hi(port);
-
-#define ESP8266_LOG_DISABLED
+void ICACHE_FLASH_ATTR supla_esp_board_starting(void);
+uint8 ICACHE_FLASH_ATTR supla_esp_board_get_impulse_counter(
+    unsigned char channel_number, TDS_ImpulseCounter_Value *icv);
+uint8 supla_esp_board_intr_handler(uint32 gpio_status);
 
 #endif

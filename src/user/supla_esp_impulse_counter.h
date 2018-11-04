@@ -16,25 +16,19 @@
  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 
-#ifndef SONOFF_DUAL_H_
-#define SONOFF_DUAL_H_
+#ifndef SUPLA_IMPULSE_COUNTER_H_
+#define SUPLA_IMPULSE_COUNTER_H_
 
-#define ESP8266_SUPLA_PROTO_VERSION 7
-#define LED_RED_PORT    13
-#define B_RELAY1_PORT   20
-#define B_RELAY2_PORT   21
+#include "supla_esp.h"
 
-void supla_esp_board_start(void);
+#ifdef IMPULSE_COUNTER
 
-void supla_esp_board_gpio_hi(int port, char hi);
-char supla_esp_board_gpio_is_hi(int port);
-char supla_esp_board_gpio_relay_on(int port);
+void ICACHE_FLASH_ATTR supla_esp_ic_init(void);
+void ICACHE_FLASH_ATTR supla_esp_ic_start(void);
+void ICACHE_FLASH_ATTR supla_esp_ic_device_registered(void);
+void ICACHE_FLASH_ATTR supla_esp_ic_get_value(
+    unsigned char channel_number, char value[SUPLA_CHANNELVALUE_SIZE]);
 
-void supla_esp_board_send_channel_values_with_delay(void *srpc);
-
-#define BOARD_GPIO_OUTPUT_SET_HI if ( port >= 20 ) { supla_esp_board_gpio_hi(port, hi); return; };
-#define BOARD_GPIO_OUTPUT_IS_HI if ( port >= 20 ) return supla_esp_board_gpio_is_hi(port);
-
-#define ESP8266_LOG_DISABLED
+#endif /*IMPULSE_COUNTER*/
 
 #endif

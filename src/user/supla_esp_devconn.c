@@ -41,6 +41,10 @@
 #include "supla_esp_electricity_meter.h"
 #endif
 
+#ifdef IMPULSE_COUNTER
+#include "supla_esp_impulse_counter.h"
+#endif
+
 #ifdef __FOTA
 #include "supla_update.h"
 #endif
@@ -257,17 +261,15 @@ supla_esp_data_write(void *buf, int count, void *dcd) {
 
 	int r;
 
-
-	if ( devconn->esp_send_buffer_len > 0
-		 && supla_espconn_sent(&devconn->ESPConn, (unsigned char*)devconn->esp_send_buffer, devconn->esp_send_buffer_len) == 0 ) {
-
-		    //supla_log(LOG_DEBUG, "sproto send count: %i", count);
-
+	if ( devconn->esp_send_buffer_len > 0 ) {
+		if ((r = supla_espconn_sent(&devconn->ESPConn,
+				(unsigned char*)devconn->esp_send_buffer, devconn->esp_send_buffer_len)) == 0) {
 			devconn->esp_send_buffer_len = 0;
 			devconn->last_sent = system_get_time();
+		}
 
+		//supla_log(LOG_DEBUG, "sproto send count: %i result: %i", count, r);
 	};
-
 
 	if ( devconn->esp_send_buffer_len > 0 ) {
 		return supla_esp_data_write_append_buffer(buf, count);
@@ -276,8 +278,7 @@ supla_esp_data_write(void *buf, int count, void *dcd) {
 	if ( count > 0 ) {
 
 		r = supla_espconn_sent(&devconn->ESPConn, buf, count);
-
-		//supla_log(LOG_DEBUG, "sproto send count: %i result: %i", count, r);
+		supla_log(LOG_DEBUG, "sproto send count: %i result: %i", count, r);
 
 		if ( ESPCONN_INPROGRESS == r  ) {
 			return supla_esp_data_write_append_buffer(buf, count);
@@ -410,6 +411,10 @@ supla_esp_on_register_result(TSD_SuplaRegisterDeviceResult *register_device_resu
 
 		#ifdef ELECTRICITY_METER
 		supla_esp_em_device_registered();
+		#endif
+
+		#ifdef IMPULSE_COUNTER
+		supla_esp_ic_device_registered();
 		#endif
 
 		#ifdef BOARD_ON_DEVICE_REGISTERED
@@ -814,6 +819,14 @@ supla_esp_channel_set_rgbw_value(int ChannelNumber, int Color, char ColorBrightn
 		Brightness = 100;
 	}
 
+#ifdef SUPLA_PWM_COUNT
+	float _ColorBrightness = ColorBrightness;
+	float _Brightness = Brightness;
+	supla_esp_board_set_rgbw_value(ChannelNumber, &Color, &_ColorBrightness, &_Brightness);
+	 if ( send_value_changed ) {
+		 supla_esp_channel_rgbw_value_changed(ChannelNumber, Color, ColorBrightness, Brightness);
+	 }
+#else
 	supla_esp_hw_timer_disarm();
 
 	devconn_smooth *_smooth = &smooth[ChannelNumber];
@@ -838,6 +851,7 @@ supla_esp_channel_set_rgbw_value(int ChannelNumber, int Color, char ColorBrightn
 
 	supla_esp_hw_timer_init(FRC1_SOURCE, 1, _supla_esp_devconn_smooth_cb);
 	supla_esp_hw_timer_arm(10000);
+#endif
 
 }
 
@@ -1039,7 +1053,11 @@ supla_esp_on_remote_call_received(void *_srpc, unsigned int rr_id, unsigned int 
 		case SUPLA_SD_CALL_GET_FIRMWARE_UPDATE_URL_RESULT:
 			supla_esp_update_url_result(rd.data.sc_firmware_update_url_result);
 			break;
-		#endif
+		#endif /*__FOTA*/
+		#ifdef BOARD_CALCFG
+		case SUPLA_SD_CALL_DEVICE_CALCFG_REQUEST:
+			supla_esp_board_calcfg_request(rd.data.sd_device_calcfg_request);
+		#endif /*BOARD_CALCFG*/
 		}
 
 		srpc_rd_free(&rd);
@@ -1061,42 +1079,62 @@ supla_esp_devconn_iterate(void *timer_arg) {
 
 			if ( strlen(supla_esp_cfg.Email) > 0 ) {
 
-				TDS_SuplaRegisterDevice_D srd;
-				memset(&srd, 0, sizeof(TDS_SuplaRegisterDevice_C));
+				#if ESP8266_SUPLA_PROTO_VERSION >= 10
+					TDS_SuplaRegisterDevice_E srd;
+					memset(&srd, 0, sizeof(TDS_SuplaRegisterDevice_E));
 
-				srd.channel_count = 0;
-				ets_snprintf(srd.Email, SUPLA_EMAIL_MAXSIZE, "%s", supla_esp_cfg.Email);
-				ets_snprintf(srd.ServerName, SUPLA_SERVER_NAME_MAXSIZE, "%s", supla_esp_cfg.Server);
+					srd.ManufacturerID = MANUFACTURER_ID;
+					srd.ProductID = PRODUCT_ID;
+					srd.channel_count = 0;
+					ets_snprintf(srd.Email, SUPLA_EMAIL_MAXSIZE, "%s", supla_esp_cfg.Email);
+					ets_snprintf(srd.ServerName, SUPLA_SERVER_NAME_MAXSIZE, "%s", supla_esp_cfg.Server);
 
-				supla_esp_board_set_device_name(srd.Name, SUPLA_DEVICE_NAME_MAXSIZE);
+					supla_esp_board_set_device_name(srd.Name, SUPLA_DEVICE_NAME_MAXSIZE);
 
-				strcpy(srd.SoftVer, SUPLA_ESP_SOFTVER);
-				os_memcpy(srd.GUID, supla_esp_cfg.GUID, SUPLA_GUID_SIZE);
-				os_memcpy(srd.AuthKey, supla_esp_cfg.AuthKey, SUPLA_AUTHKEY_SIZE);
+					strcpy(srd.SoftVer, SUPLA_ESP_SOFTVER);
+					os_memcpy(srd.GUID, supla_esp_cfg.GUID, SUPLA_GUID_SIZE);
+					os_memcpy(srd.AuthKey, supla_esp_cfg.AuthKey, SUPLA_AUTHKEY_SIZE);
 
-				supla_esp_board_set_channels(srd.channels, &srd.channel_count);
+					supla_esp_board_set_channels(srd.channels, &srd.channel_count);
 
-				srpc_ds_async_registerdevice_d(devconn->srpc, &srd);
+					srpc_ds_async_registerdevice_e(devconn->srpc, &srd);
+				#else
+					TDS_SuplaRegisterDevice_D srd;
+					memset(&srd, 0, sizeof(TDS_SuplaRegisterDevice_C));
 
+					srd.channel_count = 0;
+					ets_snprintf(srd.Email, SUPLA_EMAIL_MAXSIZE, "%s", supla_esp_cfg.Email);
+					ets_snprintf(srd.ServerName, SUPLA_SERVER_NAME_MAXSIZE, "%s", supla_esp_cfg.Server);
+
+					supla_esp_board_set_device_name(srd.Name, SUPLA_DEVICE_NAME_MAXSIZE);
+
+					strcpy(srd.SoftVer, SUPLA_ESP_SOFTVER);
+					os_memcpy(srd.GUID, supla_esp_cfg.GUID, SUPLA_GUID_SIZE);
+					os_memcpy(srd.AuthKey, supla_esp_cfg.AuthKey, SUPLA_AUTHKEY_SIZE);
+
+					supla_esp_board_set_channels(srd.channels, &srd.channel_count);
+
+					srpc_ds_async_registerdevice_d(devconn->srpc, &srd);
+				#endif
 			} else {
+				#if ESP8266_SUPLA_PROTO_VERSION < 10
+					TDS_SuplaRegisterDevice_C srd;
+					memset(&srd, 0, sizeof(TDS_SuplaRegisterDevice_B));
 
-				TDS_SuplaRegisterDevice_C srd;
-				memset(&srd, 0, sizeof(TDS_SuplaRegisterDevice_B));
+					srd.channel_count = 0;
+					srd.LocationID = supla_esp_cfg.LocationID;
+					ets_snprintf(srd.LocationPWD, SUPLA_LOCATION_PWD_MAXSIZE, "%s", supla_esp_cfg.LocationPwd);
+					ets_snprintf(srd.ServerName, SUPLA_SERVER_NAME_MAXSIZE, "%s", supla_esp_cfg.Server);
 
-				srd.channel_count = 0;
-				srd.LocationID = supla_esp_cfg.LocationID;
-				ets_snprintf(srd.LocationPWD, SUPLA_LOCATION_PWD_MAXSIZE, "%s", supla_esp_cfg.LocationPwd);
-				ets_snprintf(srd.ServerName, SUPLA_SERVER_NAME_MAXSIZE, "%s", supla_esp_cfg.Server);
+					supla_esp_board_set_device_name(srd.Name, SUPLA_DEVICE_NAME_MAXSIZE);
 
-				supla_esp_board_set_device_name(srd.Name, SUPLA_DEVICE_NAME_MAXSIZE);
+					strcpy(srd.SoftVer, SUPLA_ESP_SOFTVER);
+					os_memcpy(srd.GUID, supla_esp_cfg.GUID, SUPLA_GUID_SIZE);
 
-				strcpy(srd.SoftVer, SUPLA_ESP_SOFTVER);
-				os_memcpy(srd.GUID, supla_esp_cfg.GUID, SUPLA_GUID_SIZE);
+					supla_esp_board_set_channels(srd.channels, &srd.channel_count);
 
-				supla_esp_board_set_channels(srd.channels, &srd.channel_count);
-
-				srpc_ds_async_registerdevice_c(devconn->srpc, &srd);
-
+					srpc_ds_async_registerdevice_c(devconn->srpc, &srd);
+				#endif
 			}
 
 
@@ -1155,14 +1193,18 @@ supla_espconn_disconnect(struct espconn *espconn) {
 
 void DEVCONN_ICACHE_FLASH
 supla_esp_devconn_connect_cb(void *arg) {
-	//supla_log(LOG_DEBUG, "devconn_connect_cb");
+	supla_log(LOG_DEBUG, "devconn_connect_cb");
 	supla_esp_srpc_init();
 }
 
 
 void DEVCONN_ICACHE_FLASH
 supla_esp_devconn_disconnect_cb(void *arg){
-	//supla_log(LOG_DEBUG, "devconn_disconnect_cb");
+	supla_log(LOG_DEBUG, "devconn_disconnect_cb");
+
+	devconn->esp_send_buffer_len = 0;
+	devconn->recvbuff_size = 0;
+
     supla_esp_devconn_reconnect();
 }
 
@@ -1374,7 +1416,6 @@ supla_esp_wifi_check_status(void) {
 	if ( STATION_GOT_IP == status ) {
 
 		if ( devconn->srpc == NULL ) {
-
 			supla_esp_gpio_state_ipreceived();
 			supla_esp_devconn_resolvandconnect();
 		}
@@ -1427,8 +1468,8 @@ supla_esp_devconn_timer1_cb(void *timer_arg) {
 		    		    || ( t3 >= (devconn->server_activity_timeout-5)
 		    		         && t3 <= devconn->server_activity_timeout ) ) {
 
-		    	//supla_log(LOG_DEBUG, "PING");
-		    	//system_print_meminfo();
+			    supla_log(LOG_DEBUG, "PING %i,%i", t1 / 1000000, t1 % 1000000);
+			    system_print_meminfo();
 
 				srpc_dcs_async_ping_server(devconn->srpc);
 				
@@ -1445,4 +1486,10 @@ void DEVCONN_ICACHE_FLASH supla_esp_channel_em_value_changed(unsigned char chann
 }
 #endif /*ELECTRICITY_METER*/
 
-
+#ifdef BOARD_CALCFG
+void DEVCONN_ICACHE_FLASH supla_esp_calcfg_result(TDS_DeviceCalCfgResult *result) {
+	if (supla_esp_devconn_is_registered() == 1) {
+		srpc_ds_async_device_calcfg_result(devconn->srpc, result);
+	}
+}
+#endif /*BOARD_CALCFG*/

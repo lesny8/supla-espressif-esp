@@ -85,7 +85,8 @@
 
 #include "board/acs_zam_row_04.c"
 
-#elif defined(__BOARD_zam_row_07)
+#elif defined(__BOARD_zam_row_07) \
+	  || defined(__BOARD_zam_row_07_demo)
 
 #include "board/acs_zam_row_07.c"
 
@@ -141,5 +142,9 @@
         || defined(__BOARD_lightswitch_x2_54_DHT22)
 
 #include "board/lightswitch.c"
+
+#elif defined(__BOARD_impulse_counter)
+
+#include "board/impulse_counter.c"
 
 #endif
