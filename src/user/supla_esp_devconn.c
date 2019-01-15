@@ -154,6 +154,14 @@ supla_esp_devconn_system_restart(void) {
     	os_timer_disarm(&devconn->supla_devconn_timer1);
     	os_timer_disarm(&devconn->supla_iterate_timer);
 
+		#ifdef IMPULSE_COUNTER
+		supla_esp_ic_stop();
+		#endif /*IMPULSE_COUNTER*/
+
+		#ifdef ELECTRICITY_METER
+		supla_esp_em_stop();
+		#endif /*ELECTRICITY_METER*/
+
 		#ifdef BOARD_GPIO_BEFORE_REBOOT
 		supla_esp_board_before_reboot();
 		#endif
@@ -278,7 +286,7 @@ supla_esp_data_write(void *buf, int count, void *dcd) {
 	if ( count > 0 ) {
 
 		r = supla_espconn_sent(&devconn->ESPConn, buf, count);
-		supla_log(LOG_DEBUG, "sproto send count: %i result: %i", count, r);
+		//supla_log(LOG_DEBUG, "sproto send count: %i result: %i", count, r);
 
 		if ( ESPCONN_INPROGRESS == r  ) {
 			return supla_esp_data_write_append_buffer(buf, count);
@@ -819,7 +827,7 @@ supla_esp_channel_set_rgbw_value(int ChannelNumber, int Color, char ColorBrightn
 		Brightness = 100;
 	}
 
-#ifdef SUPLA_PWM_COUNT
+#if defined(SUPLA_PWM_COUNT) || defined(SUPLA_SMOOTH_DISABLED)
 	float _ColorBrightness = ColorBrightness;
 	float _Brightness = Brightness;
 	supla_esp_board_set_rgbw_value(ChannelNumber, &Color, &_ColorBrightness, &_Brightness);
@@ -1468,8 +1476,8 @@ supla_esp_devconn_timer1_cb(void *timer_arg) {
 		    		    || ( t3 >= (devconn->server_activity_timeout-5)
 		    		         && t3 <= devconn->server_activity_timeout ) ) {
 
-			    supla_log(LOG_DEBUG, "PING %i,%i", t1 / 1000000, t1 % 1000000);
-			    system_print_meminfo();
+			    //supla_log(LOG_DEBUG, "PING %i,%i", t1 / 1000000, t1 % 1000000);
+			    //system_print_meminfo();
 
 				srpc_dcs_async_ping_server(devconn->srpc);
 				
