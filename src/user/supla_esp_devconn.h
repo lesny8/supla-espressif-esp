@@ -57,13 +57,18 @@ int DEVCONN_ICACHE_FLASH hsv2rgb(hsv in);
 void DEVCONN_ICACHE_FLASH
 supla_esp_channel_rgbw_to_value(char value[SUPLA_CHANNELVALUE_SIZE], int color, char color_brightness, char brightness);
 
+#ifdef RGBW_ONOFF_SUPPORT
+void DEVCONN_ICACHE_FLASH
+supla_esp_channel_set_rgbw_value(int ChannelNumber, int Color, char ColorBrightness, char Brightness, char TurnOnOff, char smoothly, char send_value_changed);
+#else
 void DEVCONN_ICACHE_FLASH
 supla_esp_channel_set_rgbw_value(int ChannelNumber, int Color, char ColorBrightness, char Brightness, char smoothly, char send_value_changed);
+#endif /*RGBW_ONOFF_SUPPORT*/
 
 #endif
 
 #ifdef BOARD_CALCFG
-
-#endif /*BOARD_CALCFG*/
 void DEVCONN_ICACHE_FLASH supla_esp_calcfg_result(TDS_DeviceCalCfgResult *result);
+#endif /*BOARD_CALCFG*/
+
 #endif /* SUPLA_ESP_CLIENT_H_ */
