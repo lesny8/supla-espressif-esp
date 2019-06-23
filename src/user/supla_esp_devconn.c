@@ -37,11 +37,11 @@
 #include "supla-dev/srpc.h"
 #include "supla-dev/log.h"
 
-#ifdef ELECTRICITY_METER
+#ifdef ELECTRICITY_METER_COUNT
 #include "supla_esp_electricity_meter.h"
 #endif
 
-#ifdef IMPULSE_COUNTER
+#ifdef IMPULSE_COUNTER_COUNT
 #include "supla_esp_impulse_counter.h"
 #endif
 
@@ -165,13 +165,13 @@ supla_esp_devconn_system_restart(void) {
     	os_timer_disarm(&devconn->supla_iterate_timer);
     	os_timer_disarm(&devconn->supla_value_timer);
 
-		#ifdef IMPULSE_COUNTER
+		#ifdef IMPULSE_COUNTER_COUNT
 		supla_esp_ic_stop();
-		#endif /*IMPULSE_COUNTER*/
+		#endif /*IMPULSE_COUNTER_COUNT*/
 
-		#ifdef ELECTRICITY_METER
+		#ifdef ELECTRICITY_METER_COUNT
 		supla_esp_em_stop();
-		#endif /*ELECTRICITY_METER*/
+		#endif /*ELECTRICITY_METER_COUNT*/
 
 		#ifdef BOARD_BEFORE_REBOOT
 		supla_esp_board_before_reboot();
@@ -428,11 +428,11 @@ supla_esp_on_register_result(TSD_SuplaRegisterDeviceResult *register_device_resu
 
 		supla_esp_devconn_send_channel_values_with_delay();
 
-		#ifdef ELECTRICITY_METER
+		#ifdef ELECTRICITY_METER_COUNT
 		supla_esp_em_device_registered();
 		#endif
 
-		#ifdef IMPULSE_COUNTER
+		#ifdef IMPULSE_COUNTER_COUNT
 		supla_esp_ic_device_registered();
 		#endif
 
@@ -1222,6 +1222,8 @@ supla_esp_devconn_iterate(void *timer_arg) {
 					supla_esp_board_set_channels(srd.channels, &srd.channel_count);
 
 					srpc_ds_async_registerdevice_c(devconn->srpc, &srd);
+                #else
+					supla_log(LOG_DEBUG, "iterate fail");
 				#endif
 			}
 
@@ -1568,13 +1570,13 @@ supla_esp_devconn_timer1_cb(void *timer_arg) {
 	}
 }
 
-#ifdef ELECTRICITY_METER
+#ifdef ELECTRICITY_METER_COUNT
 void DEVCONN_ICACHE_FLASH supla_esp_channel_em_value_changed(unsigned char channel_number, TElectricityMeter_ExtendedValue *em_ev) {
 	TSuplaChannelExtendedValue ev;
 	srpc_evtool_v1_emextended2extended(em_ev, &ev);
 	supla_esp_channel_extendedvalue_changed(channel_number, &ev);
 }
-#endif /*ELECTRICITY_METER*/
+#endif /*ELECTRICITY_METER_COUNT*/
 
 #ifdef BOARD_CALCFG
 void DEVCONN_ICACHE_FLASH supla_esp_calcfg_result(TDS_DeviceCalCfgResult *result) {
